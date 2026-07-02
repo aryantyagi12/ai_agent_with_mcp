@@ -8,7 +8,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langchain_core.messages import (AnyMessage,HumanMessage,AIMessage,SystemMessage)
 import psycopg
 from langchain_groq import ChatGroq
-from tools.flight_tool import search_flight
+
 
 
 from mcp_client import tavily_mcp_search,get_airports,get_airlines,aviation_mcp_call
@@ -25,14 +25,53 @@ class TravelState(TypedDict):
     itinerary:str
     llm_calls:int
 
+
+FLIGHT_AGENT_PROMPT="""
+you are a travel flight expert
+user query:
+{query}
+airport information:
+{airport_data}
+airline information:
+{airline_data}
+Generate:
+
+1. likely departure airport
+2. likely arrival airport
+3. airlines serving this rout
+4. typical flight duration
+5. estimated airface range
+6. peak season pricing warning
+7. booking advice 
+
+Return concise travel guidance.
+
+"""
+
 def flight_agent(state:TravelState):
     query=state["user_query"]
-    flight_data=search_flight(query)
+    try:
+        airports=asyncio.run(aviation_mcp_call("list_airports"))
+        airlines=asyncio.run(aviation_mcp_call("list_airlines"))
+        prompt=FLIGHT_AGENT_PROMPT.format(
+            query=query,
+            airport_data=str(airports)[:1000],
+            airline_data=str(airlines)[:1000]
+        )
+        response=llm.invoke([
+            SystemMessage(content="you are an expert travel flight planner."),
+            HumanMessage(content=prompt)
+
+        ])
+        flight_data=response.content
+    except Exception as e:
+        flight_data=f"flight information unavailable :{str(e)}"
     return {
-        "flight_results":flight_data,
-        "message":[AIMessage(content=f"flight result fetched")],
+        "flight_data":flight_data,
+        "message":[AIMessage(content="flight information fetched")],
         "llm_calls":state.get("llm_calls",0)+1
     }
+
 def hotel_agent(state:TravelState):
     query=f"hotel search for{state['user_query']}"
     hotel_data=asyncio.run(tavily_mcp_search(query))
