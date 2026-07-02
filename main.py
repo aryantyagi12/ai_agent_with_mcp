@@ -11,7 +11,7 @@ from langchain_groq import ChatGroq
 
 
 
-from mcp_client import tavily_mcp_search,get_airports,get_airlines,aviation_mcp_call
+from mcp_client import tavily_mcp_search,get_airports,get_airlines,aviation_mcp_call,extract_destination,forecast_mcp_search,weather_mcp_search
 
 load_dotenv()
 llm=ChatGroq(model="llama-3.3-70b-versatile")
@@ -24,6 +24,7 @@ class TravelState(TypedDict):
     hotel_results:str
     itinerary:str
     llm_calls:int
+    weather_results:str
 
 
 FLIGHT_AGENT_PROMPT="""
@@ -80,6 +81,22 @@ def hotel_agent(state:TravelState):
         "message":[AIMessage(content=f"hotel information fetched")],
         "llm_calls":state.get("llm_calls",0)+1
     }
+
+def weather_agent(state:TravelState):
+    city=extract_destination(state["user_query"])
+    weather_data=asyncio.run(weather_mcp_search(city))
+    forecast_data=asyncio.run(forecast_mcp_search(city))
+    return {
+        "weather_results":f"""
+        current weather in {city}:{weather_data}
+        forecast for {city}:{forecast_data}
+        """,
+        "message":[AIMessage(content=f"weather information fetched")]
+    }
+
+
+
+
 def itinerary_agent(state:TravelState):
     prompt=f"""
     create a travel itinerary.
@@ -89,6 +106,8 @@ def itinerary_agent(state:TravelState):
     {state["flight_results"]}
     hotel results:
     {state["hotel_results"]}
+    weather results:
+    {state["weather_results"]}
     """
     response=llm.invoke(
         [SystemMessage(content="you are an expert travel planner"),
@@ -99,35 +118,18 @@ def itinerary_agent(state:TravelState):
         "message":[response],
         "llm_calls":state.get("llm_calls",0)+1
     }
-def final_agent(state:TravelState):
-    final_prompt=f"""
-    Generate final travel response.
-    Flight:
-    {state["flight_results"]}
-    Hotel:
-    {state["hotel_results"]}
-    itinerary:
-    {state["itinerary"]}
-    """
-    response=llm.invoke(
-        [HumanMessage(content=final_prompt)],
 
-    )
-    return {
-        "message":[response],
-        "llm_calls":state.get("llm_calls",0)+1
-    }
 graph=StateGraph(TravelState)
 graph.add_node("flight_agent",flight_agent)
 graph.add_node("hotel_agent",hotel_agent)
-graph.add_node("final_agent",final_agent)
+graph.add_node("weather_agent",weather_agent)
 graph.add_node("itinerary_agent",itinerary_agent)
 
 graph.add_edge(START,"flight_agent")
 graph.add_edge("flight_agent","hotel_agent")
-graph.add_edge("hotel_agent","itinerary_agent")
-graph.add_edge("itinerary_agent","final_agent")
-graph.add_edge("final_agent",END)
+graph.add_edge("hotel_agent","weather_agent")
+graph.add_edge("weather_agent","itinerary_agent")
+graph.add_edge("itinerary_agent",END)
 
 _conn=psycopg.connect(DATABASE_URL)
 _conn.autocommit = True
@@ -135,9 +137,9 @@ checkpointer=PostgresSaver(_conn)
 checkpointer.setup()
 
 app=graph.compile(checkpointer=checkpointer)
-
+import uuid
 if __name__=="__main__":
-    config={"configurable":{"thread_id":"1"}}
+    config={"configurable":{"thread_id":str(uuid.uuid4())}}
     user_input=input("enter travel request")
     result=app.invoke(
         {
