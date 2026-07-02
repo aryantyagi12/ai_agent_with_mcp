@@ -1,0 +1,14 @@
+# Ignore virtual environments
+.venv1/
+venv/
+
+# Ignore environment files
+.env
+.env.*
+
+# Ignore a specific directory
+aviationstack-mcp/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
