@@ -45,9 +45,9 @@ async def tavily_mcp_search(query:str):
     result=await search_tool.ainvoke({"query":query})
     return result
 
-async def aviation_mcp_call():
-    tool_name:str
-    tool_arg:dict=None
+async def aviation_mcp_call(tool_name:str,tool_arg:dict=None):
+    
+    
     tools=await client.get_tools()
     tool=next(t for t in tools if t.name==tool_name)
     result=await tool.ainvoke(tool_arg or {})
